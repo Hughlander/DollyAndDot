@@ -1,7 +1,7 @@
 ## Interface: 120100, 120105, 120107
 ## Title: Dolly and Dot
 ## Notes: Karaoke singalong for Meerah's Jukebox. Port of the "Dolly and Dot" WeakAura (wago.io/ihJP5eZK2). /dolly to test.
-## Version: 1.0.0
+## Version: 1.0.1
 ## Author: Hughlander
 ## X-License: MIT
 ## X-Website: https://github.com/hughlander/DollyAndDot
