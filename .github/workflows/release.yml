@@ -1,0 +1,60 @@
+# Release on every push to main whose `## Version:` in the .toc has no tag yet.
+# Tags main as v<version>, zips the addon folder, and publishes a GitHub release
+# with the zip attached. Bump the Version line in DollyAndDot.toc to cut a release;
+# pushes that leave it unchanged are no-ops.
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read version from .toc
+        id: toc
+        run: |
+          version=$(sed -n 's/^## Version:[[:space:]]*//p' DollyAndDot/DollyAndDot.toc | tr -d '\r')
+          test -n "$version" || { echo "no ## Version: in .toc" >&2; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
+            echo "v$version already tagged, nothing to do"
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Syntax check (Lua 5.1, same as the WoW client)
+        if: steps.toc.outputs.exists == 'false'
+        run: |
+          sudo apt-get install -y -qq lua5.1 >/dev/null
+          for f in DollyAndDot/*.lua; do luac5.1 -p "$f"; done
+
+      - name: Build zip
+        if: steps.toc.outputs.exists == 'false'
+        run: |
+          zip -r "DollyAndDot-${{ steps.toc.outputs.version }}.zip" DollyAndDot -x '*.zip' '.*'
+          unzip -l "DollyAndDot-${{ steps.toc.outputs.version }}.zip"
+
+      - name: Tag and release
+        if: steps.toc.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          V: ${{ steps.toc.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "v$V" -m "DollyAndDot $V"
+          git push origin "v$V"
+          gh release create "v$V" "DollyAndDot-$V.zip" \
+            --title "DollyAndDot $V" \
+            --generate-notes
