@@ -1,0 +1,11 @@
+package-as: DollyAndDot
+
+move-folders:
+  DollyAndDot/DollyAndDot: DollyAndDot
+
+ignore:
+  - .github
+  - .gitignore
+  - .pkgmeta
+  - LICENSE.md
+  - README.md
