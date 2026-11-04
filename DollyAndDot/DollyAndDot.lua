@@ -346,13 +346,25 @@ events:SetScript("OnEvent", function(_, event, ...)
 
   elseif event == "UNIT_AURA" then
     local _, info = ...
-    if not info or info.isFullUpdate or not info.addedAuras then return end
-    for _, aura in ipairs(info.addedAuras) do
-      if Matches(aura.spellId, aura.name) then
-        Trigger()
-        return
+    -- On 12.x the whole payload can be secret (isFullUpdate, addedAuras and
+    -- the aura entries themselves). Even a boolean test on a secret value
+    -- throws, so every access happens inside the pcall and anything secret is
+    -- skipped. Signals 1 and 3 still cover the cast if this one yields nothing.
+    local ok, found = pcall(function()
+      if type(info) ~= "table" or IsSecret(info) then return false end
+      local full = info.isFullUpdate
+      if IsSecret(full) or full then return false end
+      local added = info.addedAuras
+      if type(added) ~= "table" or IsSecret(added) then return false end
+      for _, aura in ipairs(added) do
+        if type(aura) == "table" and not IsSecret(aura)
+           and Matches(aura.spellId, aura.name) then
+          return true
+        end
       end
-    end
+      return false
+    end)
+    if ok and found then Trigger() end
 
   elseif event == "COMBAT_LOG_EVENT_UNFILTERED" then
     local ok, subevent, spellId, spellName = pcall(function()
