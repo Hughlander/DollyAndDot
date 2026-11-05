@@ -296,15 +296,13 @@ end
 
 -- Trigger --------------------------------------------------------------------
 -- The WeakAura keyed off COMBAT_LOG SPELL_AURA_APPLIED for spell 288851. On
--- current clients that alone is unreliable (combat-log fields can be secret
--- or absent inside instances), so we watch three independent signals and
--- debounce them so one toy use only starts the song once:
+-- 12.x addons may no longer register COMBAT_LOG_EVENT_UNFILTERED (it raises
+-- ADDON_ACTION_FORBIDDEN), so we watch two independent signals and debounce
+-- them so one toy use only starts the song once:
 --   1. UNIT_SPELLCAST_SUCCEEDED for any unit token (you, party, raid, target,
 --      nameplates) casting 288851.
 --   2. UNIT_AURA on the player with 288851 / "Meerah's Jukebox" in addedAuras
 --      (someone nearby used it and you received the buff).
---   3. COMBAT_LOG_EVENT_UNFILTERED SPELL_CAST_SUCCESS / SPELL_AURA_APPLIED /
---      SPELL_AURA_REFRESH matching the id or name (secret-value safe).
 
 local DEBOUNCE   = 1.0
 local lastStart  = -math.huge
@@ -336,7 +334,6 @@ end
 local events = CreateFrame("Frame")
 events:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
 events:RegisterUnitEvent("UNIT_AURA", "player")
-events:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
 events:SetScript("OnEvent", function(_, event, ...)
   if event == "UNIT_SPELLCAST_SUCCEEDED" then
     local _, _, spellId = ...
@@ -349,7 +346,7 @@ events:SetScript("OnEvent", function(_, event, ...)
     -- On 12.x the whole payload can be secret (isFullUpdate, addedAuras and
     -- the aura entries themselves). Even a boolean test on a secret value
     -- throws, so every access happens inside the pcall and anything secret is
-    -- skipped. Signals 1 and 3 still cover the cast if this one yields nothing.
+    -- skipped. Signal 1 still covers the cast if this one yields nothing.
     local ok, found = pcall(function()
       if type(info) ~= "table" or IsSecret(info) then return false end
       local full = info.isFullUpdate
@@ -365,18 +362,6 @@ events:SetScript("OnEvent", function(_, event, ...)
       return false
     end)
     if ok and found then Trigger() end
-
-  elseif event == "COMBAT_LOG_EVENT_UNFILTERED" then
-    local ok, subevent, spellId, spellName = pcall(function()
-      local _, sub, _, _, _, _, _, _, _, _, _, id, name = CombatLogGetCurrentEventInfo()
-      return sub, id, name
-    end)
-    if not ok or IsSecret(subevent) then return end
-    if subevent == "SPELL_CAST_SUCCESS" or subevent == "SPELL_AURA_APPLIED" or subevent == "SPELL_AURA_REFRESH" then
-      if Matches(spellId, spellName) then
-        Trigger()
-      end
-    end
 
   elseif event == "ADDON_ACTION_FORBIDDEN" or event == "ADDON_ACTION_BLOCKED" then
     local addon = ...
