@@ -1,13 +1,23 @@
 # Release on every push to main whose `## Version:` in the .toc has no tag yet.
-# Tags main as v<version>, zips the addon folder, and publishes a GitHub release
-# with the zip attached. Bump the Version line in DollyAndDot.toc to cut a release;
-# pushes that leave it unchanged are no-ops.
+# Tags main as v<version>, zips the addon folder, publishes a GitHub release
+# with the zip attached, and uploads the same zip to CurseForge.
+# Bump the Version line in DollyAndDot.toc to cut a release; pushes that leave
+# it unchanged are no-ops.
+#
+# CurseForge upload needs a repo secret CF_API_KEY (CurseForge account API token).
+# To push an already-tagged version to CurseForge, run this workflow manually
+# with "upload_existing" checked.
 name: Release
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      upload_existing:
+        description: Upload the current .toc version to CurseForge even if it is already tagged
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -27,20 +37,20 @@ jobs:
           test -n "$version" || { echo "no ## Version: in .toc" >&2; exit 1; }
           echo "version=$version" >> "$GITHUB_OUTPUT"
           if git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
-            echo "v$version already tagged, nothing to do"
+            echo "v$version already tagged"
             echo "exists=true" >> "$GITHUB_OUTPUT"
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Syntax check (Lua 5.1, same as the WoW client)
-        if: steps.toc.outputs.exists == 'false'
+        if: steps.toc.outputs.exists == 'false' || inputs.upload_existing
         run: |
           sudo apt-get install -y -qq lua5.1 >/dev/null
           for f in DollyAndDot/*.lua; do luac5.1 -p "$f"; done
 
       - name: Build zip
-        if: steps.toc.outputs.exists == 'false'
+        if: steps.toc.outputs.exists == 'false' || inputs.upload_existing
         run: |
           zip -r "DollyAndDot-${{ steps.toc.outputs.version }}.zip" DollyAndDot -x '*.zip' '.*'
           unzip -l "DollyAndDot-${{ steps.toc.outputs.version }}.zip"
@@ -58,3 +68,27 @@ jobs:
           gh release create "v$V" "DollyAndDot-$V.zip" \
             --title "DollyAndDot $V" \
             --generate-notes
+
+      - name: Upload to CurseForge
+        if: steps.toc.outputs.exists == 'false' || inputs.upload_existing
+        env:
+          CF_API_KEY: ${{ secrets.CF_API_KEY }}
+          V: ${{ steps.toc.outputs.version }}
+        run: |
+          test -n "$CF_API_KEY" || { echo "CF_API_KEY secret is not set" >&2; exit 1; }
+          project_id=$(sed -n 's/^## X-Curse-Project-ID:[[:space:]]*//p' DollyAndDot/DollyAndDot.toc | tr -d '\r ')
+          # "## Interface: 120100, 120105" -> ["12.1.0","12.1.5"]
+          names=$(sed -n 's/^## Interface:[[:space:]]*//p' DollyAndDot/DollyAndDot.toc | tr -d '\r ' | tr ',' '\n' \
+            | awk 'NF { printf "%d.%d.%d\n", int($1/10000), int($1/100)%100, $1%100 }' | jq -R . | jq -sc .)
+          echo "toc game versions: $names"
+          curl -fsS -H "X-Api-Token: $CF_API_KEY" https://wow.curseforge.com/api/game/versions > versions.json
+          ids=$(jq -c --argjson n "$names" '[.[] | select(.name as $x | $n | index($x)) | .id] | unique' versions.json)
+          echo "CurseForge game version ids: $ids"
+          test "$ids" != "[]" || { echo "none of $names are known to CurseForge" >&2; exit 1; }
+          changelog=$(git log -1 --format=%B "HEAD")
+          metadata=$(jq -nc --arg cl "$changelog" --arg dn "DollyAndDot-$V.zip" --argjson ids "$ids" \
+            '{changelog: $cl, changelogType: "text", displayName: $dn, releaseType: "release", gameVersions: $ids}')
+          curl -fsS -H "X-Api-Token: $CF_API_KEY" \
+            -F "metadata=$metadata" \
+            -F "file=@DollyAndDot-$V.zip" \
+            "https://wow.curseforge.com/api/projects/$project_id/upload-file"
