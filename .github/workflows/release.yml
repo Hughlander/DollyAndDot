@@ -81,14 +81,14 @@ jobs:
           names=$(sed -n 's/^## Interface:[[:space:]]*//p' DollyAndDot/DollyAndDot.toc | tr -d '\r ' | tr ',' '\n' \
             | awk 'NF { printf "%d.%d.%d\n", int($1/10000), int($1/100)%100, $1%100 }' | jq -R . | jq -sc .)
           echo "toc game versions: $names"
-          curl -fsS -H "X-Api-Token: $CF_API_KEY" https://wow.curseforge.com/api/game/versions > versions.json
+          curl -sS --fail-with-body -H "X-Api-Token: $CF_API_KEY" https://wow.curseforge.com/api/game/versions > versions.json
           ids=$(jq -c --argjson n "$names" '[.[] | select(.name as $x | $n | index($x)) | .id] | unique' versions.json)
           echo "CurseForge game version ids: $ids"
           test "$ids" != "[]" || { echo "none of $names are known to CurseForge" >&2; exit 1; }
           changelog=$(git log -1 --format=%B "v$V")
           metadata=$(jq -nc --arg cl "$changelog" --arg dn "DollyAndDot-$V.zip" --argjson ids "$ids" \
             '{changelog: $cl, changelogType: "text", displayName: $dn, releaseType: "release", gameVersions: $ids}')
-          curl -fsS -H "X-Api-Token: $CF_API_KEY" \
-            -F "metadata=$metadata" \
+          curl -sS --fail-with-body -H "X-Api-Token: $CF_API_KEY" \
+            --form-string "metadata=$metadata" \
             -F "file=@DollyAndDot-$V.zip" \
             "https://wow.curseforge.com/api/projects/$project_id/upload-file"
